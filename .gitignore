@@ -5,6 +5,8 @@
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
 pyvenv.cfg
 
 # Python Cache & Byte-code
@@ -13,11 +15,23 @@ __pycache__/
 *$py.class
 *.so
 .Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Environment & Secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
 # ==========================================
 # Jupyter Notebooks & Checkpoints
@@ -28,46 +42,73 @@ __pycache__/
 # ==========================================
 # Datasets & Data Files
 # ==========================================
+# Exclude raw and processed datasets (keep folder structure via .gitkeep)
 data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+
+# Common data file formats
 *.csv
 *.parquet
 *.feather
+*.xlsx
+*.xls
+*.h5
+*.hdf5
+*.nc
+*.nc4
 *.zip
 *.tar.gz
 *.gz
 
 # ==========================================
-# Trained Models & Binaries
+# Trained Models & Weights
 # ==========================================
 models/*
 !models/.gitkeep
+
+# Machine Learning model binaries
 *.pkl
 *.joblib
 *.pth
 *.pt
 *.onnx
-*.h5
 *.pb
 *.bin
 *.safetensors
+*.tflite
+*.caffemodel
 
 # ==========================================
 # Output Plots, Logs & Artifacts
 # ==========================================
 outputs/*
 !outputs/.gitkeep
+
 *.log
 *.png
 *.jpg
 *.jpeg
+*.svg
 
 # ==========================================
 # IDEs & System Files
 # ==========================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
+.DS_Store?
+ehthumbs.db
 Thumbs.db
+Desktop.ini
+
+# Testing & Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
