@@ -1,0 +1,73 @@
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+.venv/
+venv/
+env/
+ENV/
+pyvenv.cfg
+
+# Python Cache & Byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# ==========================================
+# Jupyter Notebooks & Checkpoints
+# ==========================================
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# ==========================================
+# Datasets & Data Files
+# ==========================================
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+*.csv
+*.parquet
+*.feather
+*.zip
+*.tar.gz
+*.gz
+
+# ==========================================
+# Trained Models & Binaries
+# ==========================================
+models/*
+!models/.gitkeep
+*.pkl
+*.joblib
+*.pth
+*.pt
+*.onnx
+*.h5
+*.pb
+*.bin
+*.safetensors
+
+# ==========================================
+# Output Plots, Logs & Artifacts
+# ==========================================
+outputs/*
+!outputs/.gitkeep
+*.log
+*.png
+*.jpg
+*.jpeg
+
+# ==========================================
+# IDEs & System Files
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
