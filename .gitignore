@@ -1,8 +1,11 @@
-# Virtual Environment
+# Virtual Environments
 .venv/
 venv/
 env/
 ENV/
+env.bak/
+venv.bak/
+pyvenv.cfg
 
 # Python Cache & Bytecode
 __pycache__/
@@ -25,17 +28,39 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Streamlit Local Config & Secrets
+# Environment & Secrets
 .streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# IDE, OS & Editor files
-.idea/
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+*-checkpoint.ipynb
+
+# IDE, OS & System Files
 .vscode/
+.idea/
 *.swp
+*.swo
+*~
 .DS_Store
+.DS_Store?
+ehthumbs.db
 Thumbs.db
+Desktop.ini
 
 # Logs & Temporary Scratch Files
 *.log
 scratch/
+
+# Testing & Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
