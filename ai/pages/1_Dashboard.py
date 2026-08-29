@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from components.alerts import render_heatwave_alert_banner
 from components.charts import plot_hourly_forecast
+from components.disaster_assistant_ui import render_disaster_assistant_section
 from components.explainability import render_explainability_section
 from components.header import render_app_header
 from components.metrics_cards import render_weather_metrics_grid
@@ -54,7 +55,13 @@ def show_dashboard_page():
     # 5. Quick Preparedness Recommendations
     render_preparedness_section(current_risk_level=prediction_data.get("risk_level", "LOW"))
 
+    st.divider()
+
+    # 6. AI Disaster Assistant Section
+    render_disaster_assistant_section()
+
 
 if __name__ == "__main__":
+
     show_dashboard_page()
 
