@@ -24,6 +24,7 @@ prediction_page = st.Page("pages/3_Heatwave_Prediction.py", title="Heatwave Pred
 historical_page = st.Page("pages/4_Historical_Analysis.py", title="Historical Analysis", icon="📈")
 preparedness_page = st.Page("pages/5_Preparedness.py", title="Preparedness", icon="🛡️")
 about_page = st.Page("pages/6_About.py", title="About", icon="ℹ️")
+date_prediction_page = st.Page("pages/7_Date_Heatwave_Prediction.py", title="Date Heatwave Prediction", icon="🔥")
 
 pg = st.navigation(
     {
@@ -34,6 +35,7 @@ pg = st.navigation(
             historical_page,
             preparedness_page,
             about_page,
+            date_prediction_page,
         ]
     }
 )

@@ -8,9 +8,9 @@ from utils.constants import ERODE_LAT, ERODE_LON, ERODE_TIMEZONE, OPEN_METEO_FOR
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_erode_weather() -> dict[str, object]:
+def fetch_erode_weather(forecast_days: int = 16) -> dict[str, object]:
     """
-    Fetch live and past 7-day weather data for Erode, Tamil Nadu from Open-Meteo API.
+    Fetch live, recent, and bounded forecast weather data for Erode from Open-Meteo.
     Uses st.cache_data with a 5-minute (300s) TTL.
     """
     params = {
@@ -18,6 +18,7 @@ def fetch_erode_weather() -> dict[str, object]:
         "longitude": ERODE_LON,
         "timezone": ERODE_TIMEZONE,
         "past_days": 7,
+        "forecast_days": max(1, min(int(forecast_days), 16)),
         "current": [
             "temperature_2m",
             "relative_humidity_2m",
@@ -85,6 +86,11 @@ def fetch_erode_weather() -> dict[str, object]:
         return {
             "current": current_metrics,
             "hourly_df": hourly_df,
+            "forecast_range": {
+                "start": hourly_df["time"].min().date().isoformat() if not hourly_df.empty else None,
+                "end": hourly_df["time"].max().date().isoformat() if not hourly_df.empty else None,
+            },
+            "weather_source": "Open-Meteo current and forecast API",
             "error": None,
         }
 
@@ -106,6 +112,8 @@ def fetch_erode_weather() -> dict[str, object]:
                 "status": "Offline / Fallback",
             },
             "hourly_df": pd.DataFrame(),
+            "forecast_range": {"start": None, "end": None},
+            "weather_source": "Unavailable",
             "error": str(exc),
         }
 

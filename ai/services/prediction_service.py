@@ -9,6 +9,7 @@ from common import load_pickle, resolve_path
 from features.feature_engineering import add_calendar_features, add_lag_features, add_rolling_features
 from services.weather_api import convert_hourly_to_daily_summary, fetch_erode_weather
 from utils.constants import (
+    ERODE_TIMEZONE,
     HIGH_RISK_THRESHOLD,
     MEDIUM_RISK_THRESHOLD,
     RISK_LEVEL_HIGH,
@@ -42,13 +43,13 @@ def load_ml_model_artifacts():
         raise RuntimeError(f"Incompatible or corrupted model file: {err}")
 
 
-def get_historical_daily_history(max_rows: int = 60) -> pd.DataFrame:
+def get_historical_daily_history(max_rows: int | None = 60) -> pd.DataFrame:
     """Load recent historical daily weather observations for lag/rolling calculations."""
     if not HISTORICAL_DAILY_CSV.exists():
         raise FileNotFoundError(f"Historical daily file not found at {HISTORICAL_DAILY_CSV}.")
     df = pd.read_csv(HISTORICAL_DAILY_CSV, parse_dates=["date"])
     df = df.sort_values("date").reset_index(drop=True)
-    return df.tail(max_rows).copy()
+    return df.tail(max_rows).copy() if max_rows else df.copy()
 
 
 def calculate_risk_level(probability: float) -> str:
@@ -60,7 +61,11 @@ def calculate_risk_level(probability: float) -> str:
     return RISK_LEVEL_LOW
 
 
-def build_feature_row_from_history(combined_df: pd.DataFrame, feature_columns: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_feature_row_from_history(
+    combined_df: pd.DataFrame,
+    feature_columns: list[str],
+    target_date: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Apply calendar, lag, and rolling calculations without data leakage.
     Returns (feature_row_df, full_feature_df).
@@ -70,7 +75,9 @@ def build_feature_row_from_history(combined_df: pd.DataFrame, feature_columns: l
     df = add_lag_features(df)
     df = add_rolling_features(df)
 
-    latest_row = df.tail(1).copy()
+    latest_row = df[df["date"] == target_date].copy() if target_date is not None else df.tail(1).copy()
+    if latest_row.empty:
+        raise ValueError(f"No feature row is available for target date {target_date.date() if target_date is not None else target_date}.")
     missing_cols = [c for c in feature_columns if c not in latest_row.columns]
     if missing_cols:
         raise ValueError(f"Missing required feature columns: {missing_cols}")
@@ -169,6 +176,8 @@ def get_realtime_prediction() -> dict[str, object]:
             "xai_drivers": xai_drivers,
             "model_name": metadata.get("best_model", "Logistic Regression"),
             "test_metrics": metadata.get("test_metrics", {}),
+            "weather_source": weather_payload.get("weather_source", "Open-Meteo current weather API"),
+            "weather_error": weather_payload.get("error"),
         }
     except Exception as err:
         return {
@@ -178,6 +187,80 @@ def get_realtime_prediction() -> dict[str, object]:
             "target_date": "N/A",
             "model_name": metadata.get("best_model", "Trained ML Model"),
             "current_weather": current_weather,
+        }
+
+
+def get_prediction_for_date(target_date: pd.Timestamp | str, weather_payload: dict[str, object] | None = None) -> dict[str, object]:
+    """Run the saved heatwave model for one historical or forecast calendar date."""
+    target = pd.Timestamp(target_date).normalize()
+    today = pd.Timestamp.now(tz=ERODE_TIMEZONE).tz_localize(None).normalize()
+
+    try:
+        model, feature_columns, metadata = load_ml_model_artifacts()
+        history = get_historical_daily_history(max_rows=None)
+
+        if target > today:
+            payload = weather_payload or fetch_erode_weather()
+            hourly_df = payload.get("hourly_df", pd.DataFrame())
+            forecast_daily = convert_hourly_to_daily_summary(hourly_df)
+            target_weather = forecast_daily[forecast_daily["date"] == target].copy()
+            if target_weather.empty:
+                available_start = forecast_daily["date"].min().date().isoformat() if not forecast_daily.empty else None
+                available_end = forecast_daily["date"].max().date().isoformat() if not forecast_daily.empty else None
+                return {
+                    "available": False,
+                    "error": "Requested date is outside the available weather forecast range.",
+                    "forecast_range": {"start": available_start, "end": available_end},
+                    "target_date": target.date().isoformat(),
+                    "weather_source": payload.get("weather_source", "Open-Meteo forecast API"),
+                }
+
+            history_before_target = history[history["date"] < target].tail(60)
+            history_end = history_before_target["date"].max() if not history_before_target.empty else pd.Timestamp.min
+            future_rows = forecast_daily[forecast_daily["date"] > history_end]
+            combined_df = pd.concat([history_before_target, future_rows], ignore_index=True)
+            weather_source = "Open-Meteo forecast API"
+        else:
+            target_weather = history[history["date"] == target].copy()
+            if target_weather.empty:
+                return {
+                    "available": False,
+                    "error": "Historical weather data is not available for the requested date.",
+                    "target_date": target.date().isoformat(),
+                    "weather_source": "Historical Erode daily dataset",
+                }
+            combined_df = history[history["date"] <= target].tail(60).copy()
+            weather_source = "Historical Erode daily dataset"
+
+        feature_row, full_row = build_feature_row_from_history(combined_df, feature_columns, target_date=target)
+        pred_class = int(model.predict(feature_row)[0])
+        probability = float(model.predict_proba(feature_row)[0][1]) if hasattr(model, "predict_proba") else float(pred_class)
+        target_values = target_weather.iloc[0].to_dict()
+        target_values["date"] = target.date().isoformat()
+        target_values["temperature_2m"] = float(target_values["max_temperature"])
+
+        return {
+            "available": True,
+            "target_date": target.date().isoformat(),
+            "date_type": "future" if target > today else "past",
+            "weather": target_values,
+            "temperature": float(target_values["temperature_2m"]),
+            "prediction_class": pred_class,
+            "probability": round(probability, 4),
+            "risk_level": calculate_risk_level(probability),
+            "feature_row": feature_row,
+            "full_row": full_row,
+            "xai_drivers": compute_feature_contributions(model, feature_row, feature_columns),
+            "model_name": metadata.get("best_model", "Trained ML Model"),
+            "weather_source": weather_source,
+            "forecast_range": payload.get("forecast_range") if target > today else None,
+        }
+    except Exception as err:
+        return {
+            "available": False,
+            "error": f"Date-specific prediction failed: {err}",
+            "target_date": target.date().isoformat(),
+            "weather_source": "Unavailable",
         }
 
 

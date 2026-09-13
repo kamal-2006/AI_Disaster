@@ -50,6 +50,31 @@ A **Streamlit web application** for **“SafeGraph AI: A Knowledge Graph and Age
    - Streamlit `@st.cache_data(ttl=300)` for 5-minute weather API caching.
    - Manual **"🔄 Refresh Weather"** button to force API data updates.
 
+## Disaster Assistant Retrieval Pipeline
+
+The Disaster Assistant follows this sequence:
+
+```text
+User question
+   -> question understanding (disaster, intent, topic, urgency, entities)
+   -> Knowledge Graph retrieval (Disaster -> Topic -> Knowledge nodes)
+   -> relevance ranking and filtering
+   -> LLM reasoning over retrieved context (when configured)
+   -> explainable answer
+```
+
+The current repository does not contain a Neo4j dependency, connection, schema, or
+persisted graph. `services/knowledge_graph.py` therefore materializes the existing
+curated knowledge base as a local graph with explicit nodes and relationships. It
+is the retrieval boundary used by the assistant and can be replaced by a Neo4j
+adapter later without changing the assistant or LLM contract. Unsupported
+disasters return a clear no-data response instead of falling back to unrelated
+generic guidance.
+
+Set `SAFEGRAPH_AI_DEBUG=1` during development to include question understanding,
+retrieved graph nodes and relationships, final context, final LLM prompt, and
+answer in the service result. The Streamlit UI does not render these internals.
+
 ---
 
 ## 📂 Modular Code Structure

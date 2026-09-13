@@ -57,6 +57,9 @@ DISASTER_KNOWLEDGE_BASE = {
     "flood": {
         "title": "Flood Safety & Waterlogging Guidance",
         "description": "Essential precautions for heavy rainfall, river overflow (e.g. Cauvery river near Erode), and urban waterlogging.",
+        "explanations": [
+            "Floodwater can energize appliances and wiring, creating an electric-shock hazard even when the power appears to be off; disconnect power only from a dry, safe location.",
+        ],
         "immediate_actions": [
             "Move immediately to higher ground or upper floors if rising water threatens your home.",
             "Keep emergency survival kits, important documents, medicines, and flashlights packed in waterproof containers.",
@@ -106,6 +109,9 @@ DISASTER_KNOWLEDGE_BASE = {
     "earthquake": {
         "title": "Earthquake Safety (Drop, Cover, and Hold On)",
         "description": "Life-saving emergency steps to protect yourself during ground shaking and tremors.",
+        "explanations": [
+            "Earthquakes happen when stress built up in the Earth's crust is suddenly released as rocks slip along a fault, sending seismic waves through the ground.",
+        ],
         "immediate_actions": [
             "**DROP** down onto your hands and knees immediately to prevent being knocked over.",
             "**COVER** your head and neck under a sturdy table, desk, or furniture. If no table is nearby, cover your head with your arms against an interior wall.",
@@ -276,7 +282,7 @@ DISASTER_KNOWLEDGE_BASE = {
 
 # Categorization mapping helper
 KEYWORD_CATEGORY_MAP = {
-    "heatwave": ["heatwave", "heat wave", "extreme heat", "sunstroke", "heat stroke", "heat stress", "hot day", "temperature high", "going outside", "outside today", "precautions today"],
+    "heatwave": ["heatwave", "heat wave", "extreme heat", "sunstroke", "heat stroke", "heat exhaustion", "heat stress", "dehydration", "hot day", "temperature high", "going outside", "outside today", "precautions today"],
     "flood": ["flood", "flooding", "waterlog", "water logging", "overflow", "river cauvery", "heavy rain", "inundation"],
     "cyclone": ["cyclone", "storm", "gale", "hurricane", "typhoon", "high wind", "sea storm"],
     "earthquake": ["earthquake", "tremor", "ground shaking", "seismic", "aftershock", "quake"],
