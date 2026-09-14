@@ -45,13 +45,20 @@ OFF_TOPIC_TERMS = {
 }
 
 
+from heatwave_prediction.date_parser import parse_date_input
+
+
 def is_disaster_related_query(query: str) -> bool:
     """
     Determine if a user's natural language query is related to disaster preparedness,
-    emergency response, safety, or weather risks.
+    emergency response, safety, weather risks, or date queries.
     """
     q_clean = query.lower().strip()
     words = set(re.findall(r"\b\w+\b", q_clean))
+
+    # Check if query contains explicit date input
+    if parse_date_input(query)["valid"]:
+        return True
 
     # Explicit check for common off-topic topics
     for word in words:
@@ -421,10 +428,12 @@ def generate_grounded_fallback_response(
 def generate_weather_fallback_response(weather_result: Dict[str, Any]) -> str:
     """Format API and model results without allowing generated weather values."""
     if not weather_result.get("available"):
-        error = weather_result.get("error", "Weather data or prediction is unavailable.")
-        if weather_result.get("date_type") == "future":
-            return "I can predict heatwave risk only for dates within the available weather forecast range. Please provide a date within that range."
-        return f"I could not retrieve reliable weather data for the requested date: {error}"
+        return weather_result.get("error", "Weather data or heatwave prediction is unavailable for the requested date.")
+
+    if weather_result.get("user_response"):
+        return weather_result["user_response"]
+    if isinstance(weather_result.get("prediction"), dict) and weather_result["prediction"].get("user_response"):
+        return weather_result["prediction"]["user_response"]
 
     date_type = weather_result.get("date_type")
     temperature = weather_result.get("temperature")
@@ -435,33 +444,44 @@ def generate_weather_fallback_response(weather_result: Dict[str, Any]) -> str:
 
     if date_type == "today":
         lines = [
-            "### Current weather in Erode",
-            f"**Temperature:** {temperature_text}",
-            f"**Heatwave risk:** {risk_text}",
+            "## Heatwave Prediction",
             "",
-            "The current heatwave risk is calculated from current weather conditions and the trained heatwave model.",
+            "Location: Erode",
+            "Date: Today",
+            "",
+            f"Current Temperature: {temperature_text}",
+            f"Heatwave Risk: {risk_text}",
+            "",
+            f"Prediction: Current weather conditions indicate a {risk_text.lower()} heatwave risk.",
         ]
     elif date_type == "future":
-        formatted_date = datetime.strptime(weather_result["date"], "%Y-%m-%d").strftime("%B %d, %Y").replace(" 0", " ")
+        formatted_date = datetime.strptime(weather_result["date"], "%Y-%m-%d").strftime("%d %B %Y")
         lines = [
-            f"### Forecast for Erode — {formatted_date}",
-            f"**Expected temperature:** {temperature_text}",
-            f"**Heatwave risk:** {risk_text}",
+            "## Heatwave Prediction",
             "",
-            "This is a forecast-based prediction and may change as the date approaches.",
+            "Location: Erode",
+            f"Date: {formatted_date}",
+            "",
+            f"Forecast Temperature: {temperature_text}",
+            f"Heatwave Risk: {risk_text}",
+            "",
+            f"Prediction: Heatwave conditions are {'likely' if str(risk_level).upper() in ('HIGH', '1') else 'unlikely'} based on the forecast weather conditions and the trained heatwave model.",
+            "",
+            "Data Source:",
+            "Open-Meteo Forecast + SafeGraph AI Heatwave Model",
         ]
     else:
-        formatted_date = datetime.strptime(weather_result["date"], "%Y-%m-%d").strftime("%B %d, %Y").replace(" 0", " ")
+        formatted_date = datetime.strptime(weather_result["date"], "%Y-%m-%d").strftime("%d %B %Y")
         lines = [
-            f"### Historical weather in Erode — {formatted_date}",
-            f"**Recorded maximum temperature:** {temperature_text}",
-            f"**Model heatwave risk:** {risk_text}",
+            "## Heatwave Prediction (Historical)",
+            "",
+            "Location: Erode",
+            f"Date: {formatted_date}",
+            "",
+            f"Recorded Temperature: {temperature_text}",
+            f"Heatwave Risk: {risk_text}",
         ]
 
-    if probability is not None:
-        lines.append(f"**Model probability:** {float(probability) * 100:.1f}%")
-    lines.append(f"*Weather source: {weather_result.get('weather_source', 'Weather data source')}*\n")
-    lines.append(DISASTER_DISCLAIMER)
     return "\n".join(lines)
 
 

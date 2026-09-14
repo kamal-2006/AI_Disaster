@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 
@@ -10,43 +11,62 @@ from features.feature_engineering import add_calendar_features, add_lag_features
 from .config import FEATURE_COLUMNS_PATH, HISTORICAL_DAILY_PATH
 
 
-def load_feature_columns() -> list[str]:
+def load_feature_columns() -> List[str]:
+    """Load saved feature column list matching model training."""
     if not FEATURE_COLUMNS_PATH.exists():
-        raise FileNotFoundError(f"Feature metadata is missing: {FEATURE_COLUMNS_PATH}")
+        raise FileNotFoundError(f"Feature metadata file missing at: {FEATURE_COLUMNS_PATH}")
     columns = load_pickle(FEATURE_COLUMNS_PATH)
     if not isinstance(columns, list) or not columns:
         raise ValueError("Saved feature metadata is empty or invalid.")
     return columns
 
 
-def build_model_features(target_date: date, forecast_daily: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Apply the exact training feature functions and saved feature order."""
+def build_model_features(target_date: date, forecast_daily: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Engineer the exact 35 model features for a target date without data leakage.
+    Stitches historical observations with forecast daily rows to generate accurate
+    lags (1, 2, 3, 7) and rolling averages (3, 5, 7).
+    """
     if not HISTORICAL_DAILY_PATH.exists():
-        raise FileNotFoundError(f"Historical daily dataset is missing: {HISTORICAL_DAILY_PATH}")
+        raise FileNotFoundError(f"Historical daily dataset missing at: {HISTORICAL_DAILY_PATH}")
 
     history = pd.read_csv(HISTORICAL_DAILY_PATH, parse_dates=["date"]).sort_values("date")
-    target = pd.Timestamp(target_date).normalize()
-    history_before_target = history[history["date"] < target].tail(60)
-    if history_before_target.empty:
-        raise ValueError("There is not enough historical data before the requested date to calculate lag features.")
+    target_ts = pd.Timestamp(target_date).normalize()
 
-    history_end = history_before_target["date"].max()
-    future_rows = forecast_daily[forecast_daily["date"] > history_end].copy()
-    combined = pd.concat([history_before_target, future_rows], ignore_index=True).sort_values("date")
+    # Filter history strictly prior to target date
+    history_before_target = history[history["date"] < target_ts].tail(60)
+
+    if history_before_target.empty:
+        # If target date is within historical dataset itself (past date query)
+        target_in_history = history[history["date"] == target_ts]
+        if not target_in_history.empty:
+            history_before_target = history[history["date"] <= target_ts].tail(60)
+            combined = history_before_target.copy().sort_values("date").reset_index(drop=True)
+        else:
+            raise ValueError(f"Not enough historical daily records prior to {target_date.isoformat()} for lag calculation.")
+    else:
+        history_end = history_before_target["date"].max()
+        future_rows = forecast_daily[forecast_daily["date"] > history_end].copy()
+        combined = pd.concat([history_before_target, future_rows], ignore_index=True).sort_values("date").reset_index(drop=True)
+
+    # Compute calendar, lag, and rolling features
     combined = add_calendar_features(combined)
     combined = add_lag_features(combined)
     combined = add_rolling_features(combined)
 
-    target_rows = combined[combined["date"] == target]
+    # Extract target date row
+    target_rows = combined[combined["date"].dt.date == target_date]
     if target_rows.empty:
-        raise ValueError(f"No model feature row was produced for {target_date.isoformat()}.")
+        raise ValueError(f"Feature calculation failed: no row generated for target date {target_date.isoformat()}.")
 
     feature_columns = load_feature_columns()
-    missing = [column for column in feature_columns if column not in target_rows.columns]
-    if missing:
-        raise ValueError(f"The model requires missing features: {missing}")
+    missing_cols = [col for col in feature_columns if col not in target_rows.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required model feature columns: {missing_cols}")
+
     feature_row = target_rows[feature_columns].copy()
     if feature_row.isna().any().any():
-        missing_values = feature_row.columns[feature_row.isna().any()].tolist()
-        raise ValueError(f"Required model features contain missing values: {missing_values}")
+        null_cols = feature_row.columns[feature_row.isna().any()].tolist()
+        raise ValueError(f"Required model features contain NaN values for {target_date.isoformat()}: {null_cols}")
+
     return feature_row, target_rows.iloc[0].to_dict()

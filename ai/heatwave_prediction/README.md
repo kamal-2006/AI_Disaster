@@ -1,29 +1,75 @@
-# Independent Heatwave Prediction Module
+# Heatwave Prediction Module
 
-This module predicts Erode heatwave risk for one user-provided date. It does
-not import or modify the Disaster Assistant, Knowledge Graph, or LLM logic.
+Independent, date-aware heatwave risk prediction system for **Erode, Tamil Nadu**.
 
-## Run
+## Overview
+This module integrates live Open-Meteo weather forecast data with a trained machine learning classification pipeline (`models/heatwave_model.pkl`) to predict temperature and heatwave risk for any given target date.
 
-From the `ai/` directory:
-
-```powershell
-..\.venv\Scripts\python.exe -m heatwave_prediction.predictor 2026-09-20
+## Module Structure
+```
+heatwave_prediction/
+│
+├── __init__.py         # Package entry points (predict_heatwave, parse_date_input)
+├── predictor.py        # Main prediction controller & response formatter
+├── weather_service.py  # Open-Meteo forecast & current weather service
+├── preprocessing.py    # 35-feature engineering matching ML training pipeline
+├── date_parser.py      # Flexible date parser (ISO, DD-MM-YYYY, DD/MM/YYYY, relative)
+├── config.py           # Erode coordinates, API URLs, and model configurations
+└── README.md           # Documentation
 ```
 
-Accepted dates include `Today`, `Tomorrow`, `YYYY-MM-DD`, `September 20, 2026`,
-and `20/09/2026`.
+## Workflow Architecture
+```
+              USER
+               │
+               ▼
+          ENTER DATE
+               │
+               ▼
+         DATE PARSER
+               │
+      ┌────────┴────────┐
+      │                 │
+    TODAY             FUTURE
+      │                 │
+      ▼                 ▼
+Current Weather      Forecast API
+      │                 │
+      └────────┬────────┘
+               ▼
+          WEATHER DATA
+               │
+               ▼
+      FEATURE ENGINEERING
+               │
+               ▼
+      EXISTING PREPROCESSING
+               │
+               ▼
+         HEATWAVE MODEL
+       (heatwave_model.pkl)
+               │
+               ▼
+          HEATWAVE RISK
+               │
+               ▼
+       TEMPERATURE + RISK
+```
 
-## Existing artifacts reused
+## Supported Input Date Formats
+- `2026-09-20` (YYYY-MM-DD)
+- `20-09-2026` (DD-MM-YYYY)
+- `20/09/2026` (DD/MM/YYYY)
+- `September 20, 2026`
+- `20 September 2026`
+- `today`
+- `tomorrow`
+- `next week`
 
-- Model: `models/heatwave_model.pkl`
-- Feature order: `models/feature_columns.pkl` (35 saved columns)
-- Historical data: `data/processed/erode_daily.csv`
-- Feature preprocessing: `features.feature_engineering.add_calendar_features`,
-  `add_lag_features`, and `add_rolling_features`
-- Risk classification: `services.prediction_service.calculate_risk_level`
-- Weather: Open-Meteo forecast API for Erode (`11.3410`, `77.7172`)
+## Programmatic Usage
+```python
+from heatwave_prediction import predict_heatwave
 
-The module never substitutes a fabricated temperature or a threshold-based
-prediction. Dates outside the available Open-Meteo range return an unavailable
-result.
+result = predict_heatwave("2026-09-20")
+print(result["user_response"])
+```

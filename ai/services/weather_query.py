@@ -24,44 +24,24 @@ DATE_PATTERN = re.compile(
 )
 
 
+from heatwave_prediction.date_parser import parse_date_input
+
+
 def erode_today() -> date:
     return datetime.now(ZoneInfo(ERODE_TIMEZONE)).date()
 
 
 def parse_requested_date(query: str, today: Optional[date] = None) -> Dict[str, Any]:
-    """Parse explicit and relative dates without silently treating dates as today."""
-    today = today or erode_today()
-    q_lower = query.lower()
-
-    if re.search(r"\b(today|now|currently|current)\b", q_lower):
-        return {"date": today, "date_type": "today", "raw": "today", "error": None}
-    if re.search(r"\btomorrow\b", q_lower):
-        target = today + timedelta(days=1)
-        return {"date": target, "date_type": "future", "raw": "tomorrow", "error": None}
-    if re.search(r"\byesterday\b", q_lower):
-        target = today - timedelta(days=1)
-        return {"date": target, "date_type": "past", "raw": "yesterday", "error": None}
-
-    match = DATE_PATTERN.search(query)
-    if not match:
-        return {"date": today, "date_type": "today", "raw": "implicit today", "error": None}
-
-    try:
-        if match.group("iso"):
-            target = date.fromisoformat(match.group("iso"))
-        elif match.group("numeric"):
-            month, day_value, year = (int(part) for part in match.group("numeric").split("/"))
-            target = date(year, month, day_value)
-        elif match.group("month"):
-            target = date(int(match.group("year")), MONTHS[match.group("month").lower()], int(match.group("day")))
-        else:
-            year = int(match.group("year_first") or today.year)
-            target = date(year, MONTHS[match.group("month_first").lower()], int(match.group("day_first")))
-    except ValueError as exc:
-        return {"date": None, "date_type": "invalid", "raw": match.group(0), "error": str(exc)}
-
-    date_type = "future" if target > today else "past" if target < today else "today"
-    return {"date": target, "date_type": date_type, "raw": match.group(0), "error": None}
+    """Parse explicit and relative dates using heatwave_prediction date_parser."""
+    res = parse_date_input(query, today_override=today)
+    if res["valid"]:
+        return {
+            "date": res["target_date"],
+            "date_type": res["date_type"].lower(),
+            "raw": res["raw_input"],
+            "error": None,
+        }
+    return {"date": None, "date_type": "invalid", "raw": query, "error": res["error"]}
 
 
 def classify_weather_question(query: str) -> Optional[Dict[str, Any]]:
@@ -74,25 +54,23 @@ def classify_weather_question(query: str) -> Optional[Dict[str, Any]]:
     heatwave_request = "heatwave" in q_lower or "heat wave" in q_lower
     date_words = any(term in q_lower for term in ("today", "tomorrow", "yesterday", "on "))
     heatwave_date_request = heatwave_request and any(term in q_lower for term in ("risk", "prediction", "will there", "is there"))
-    if not any(term in q_lower for term in weather_terms) and not (heatwave_date_request or (heatwave_request and date_words)):
+
+    parsed_res = parse_date_input(query)
+    is_explicit_date = parsed_res["valid"]
+
+    if not any(term in q_lower for term in weather_terms) and not (heatwave_date_request or (heatwave_request and date_words)) and not is_explicit_date:
         return None
 
     parsed_date = parse_requested_date(query)
     date_type = parsed_date["date_type"]
     if date_type == "invalid":
         intent = "invalid_date"
-    elif heatwave_request and date_type == "future":
-        intent = "future_heatwave_risk"
-    elif heatwave_request and date_type == "past":
-        intent = "historical_heatwave_risk"
-    elif heatwave_request:
-        intent = "current_heatwave_risk"
     elif date_type == "future":
-        intent = "future_weather"
+        intent = "future_heatwave_risk"
     elif date_type == "past":
-        intent = "historical_weather"
+        intent = "historical_heatwave_risk"
     else:
-        intent = "current_weather"
+        intent = "current_heatwave_risk"
 
     return {
         "location": LOCATION_NAME,

@@ -1,151 +1,239 @@
 from __future__ import annotations
 
 import argparse
-from datetime import date, datetime, timedelta
-from typing import Any
-from zoneinfo import ZoneInfo
+import os
+import sys
+from datetime import date
+from pathlib import Path
+from typing import Any, Dict
 
 import joblib
+import pandas as pd
 
-from services.prediction_service import calculate_risk_level, get_realtime_prediction
+def calculate_risk_level(probability: float) -> str:
+    """Classify probability into LOW, MEDIUM/MODERATE, or HIGH risk level."""
+    if probability >= 0.80:
+        return "HIGH"
+    if probability >= 0.50:
+        return "MEDIUM"
+    return "LOW"
 
-from .config import HISTORICAL_DAILY_PATH, LOCATION, MODEL_PATH, TIMEZONE
+from .config import HISTORICAL_DAILY_PATH, LOCATION, MODEL_PATH
+from .date_parser import format_display_date, get_current_today, parse_date_input
 from .preprocessing import build_model_features
 from .weather_service import fetch_weather_for_date
 
 
-MONTHS = {name.lower(): index for index, name in enumerate(
-    ("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"),
-    start=1,
-)}
+def format_user_response(result: Dict[str, Any]) -> str:
+    """Format final output string matching requirement #20 format."""
+    if not result.get("available"):
+        return result.get("explanation") or result.get("error") or "Heatwave prediction is unavailable for the requested date."
+
+    date_type = result.get("date_type", "").lower()
+    location = result.get("location", LOCATION)
+    formatted_date = result.get("formatted_date", result.get("date"))
+    temperature = result.get("temperature")
+    temp_str = f"{float(temperature):.1f}°C" if temperature is not None else "N/A"
+    risk = result.get("risk", "Low").title()
+    pred_class = result.get("prediction_class", 0)
+
+    if date_type == "today":
+        if pred_class == 1 or risk.upper() in {"HIGH", "MEDIUM", "MODERATE"}:
+            pred_desc = f"Current weather conditions indicate a {risk.lower()} heatwave risk."
+        else:
+            pred_desc = "Current weather conditions indicate a low heatwave risk."
+
+        return (
+            "## Heatwave Prediction\n\n"
+            f"Location: {location}\n"
+            "Date: Today\n\n"
+            f"Current Temperature: {temp_str}\n"
+            f"Heatwave Risk: {risk}\n\n"
+            f"Prediction: {pred_desc}"
+        )
+
+    elif date_type == "future":
+        if pred_class == 1 or risk.upper() == "HIGH":
+            pred_desc = "Heatwave conditions are likely based on the forecast weather conditions and the trained heatwave model."
+        elif risk.upper() in {"MEDIUM", "MODERATE"}:
+            pred_desc = "Moderate heatwave conditions are possible based on the forecast weather conditions and the trained heatwave model."
+        else:
+            pred_desc = "Heatwave conditions are unlikely based on the forecast weather conditions and the trained heatwave model."
+
+        return (
+            "## Heatwave Prediction\n\n"
+            f"Location: {location}\n"
+            f"Date: {formatted_date}\n\n"
+            f"Forecast Temperature: {temp_str}\n"
+            f"Heatwave Risk: {risk}\n\n"
+            f"Prediction: {pred_desc}\n\n"
+            "Data Source:\n"
+            "Open-Meteo Forecast + SafeGraph AI Heatwave Model"
+        )
+
+    else:
+        # Historical / Past
+        return (
+            "## Heatwave Prediction (Historical)\n\n"
+            f"Location: {location}\n"
+            f"Date: {formatted_date}\n\n"
+            f"Recorded Temperature: {temp_str}\n"
+            f"Heatwave Risk: {risk}\n\n"
+            f"Prediction: Historical weather records show a {risk.lower()} heatwave risk level."
+        )
 
 
-def _today() -> date:
-    return datetime.now(ZoneInfo(TIMEZONE)).date()
+def _log_debug_info(parsed: Dict[str, Any], weather: Dict[str, Any], feature_row: pd.DataFrame | None, pred_class: int | None, risk: str | None) -> None:
+    """Print debug output matching requirement #17 when SAFEGRAPH_AI_DEBUG is set."""
+    if os.getenv("SAFEGRAPH_AI_DEBUG", "").lower() not in {"1", "true", "yes"}:
+        return
+
+    feat_dict = feature_row.iloc[0].to_dict() if feature_row is not None and not feature_row.empty else {}
+    print("\n---")
+    print("## HEATWAVE PREDICTION DEBUG")
+    print(f"User Input: {parsed.get('raw_input')}")
+    print(f"Parsed Date: {parsed.get('iso_date')}")
+    print(f"Date Type: {parsed.get('date_type')}")
+    print(f"Location: {LOCATION}")
+    print(f"Weather API URL: {weather.get('api_url', 'N/A')}")
+    print(f"Forecast Date Retrieved: {weather.get('target_date', 'N/A')}")
+    print(f"Temperature: {weather.get('target_weather', {}).get('max_temperature', weather.get('current', {}).get('temperature_2m'))}")
+    print(f"Humidity: {weather.get('target_weather', {}).get('mean_relative_humidity', weather.get('current', {}).get('relative_humidity_2m'))}")
+    print(f"Wind Speed: {weather.get('target_weather', {}).get('mean_wind_speed', weather.get('current', {}).get('wind_speed_10m'))}")
+    print(f"Other Model Features: {list(feat_dict.keys())[:5]}... (Total: {len(feat_dict)})")
+    print(f"Processed Features: {feat_dict}")
+    print(f"Model Prediction: {pred_class}")
+    print(f"Risk: {risk}")
+    print("-----\n")
 
 
-def parse_date(value: str | date) -> date:
-    if isinstance(value, date):
-        return value
-    text = value.strip()
-    today = _today()
-    lowered = text.lower()
-    if lowered in {"today", "now", "current"}:
-        return today
-    if lowered == "tomorrow":
-        return today + timedelta(days=1)
-    if lowered == "yesterday":
-        return today - timedelta(days=1)
-
-    for format_string in ("%Y-%m-%d", "%B %d, %Y", "%B %d %Y", "%d %B %Y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(text, format_string).date()
-        except ValueError:
-            continue
-    raise ValueError("Use YYYY-MM-DD, Today, Tomorrow, September 20, 2026, or 20/09/2026.")
-
-
-def _failure(target: date, message: str, source: str = "Heatwave prediction module") -> dict[str, Any]:
+def _failure_result(target_date_str: str, formatted_date_str: str, message: str, source: str, date_type: str = "future") -> Dict[str, Any]:
     return {
         "available": False,
-        "date": target.isoformat(),
+        "date": target_date_str,
+        "formatted_date": formatted_date_str,
         "location": LOCATION,
         "temperature": None,
         "risk": None,
         "prediction": None,
+        "source": source,
         "explanation": message,
+        "error": message,
         "weather_source": source,
+        "date_type": date_type,
     }
 
 
-def _result(target: date, temperature: float, risk: str, probability: float, prediction: str, source: str, **extra: Any) -> dict[str, Any]:
-    return {
-        "available": True,
-        "date": target.isoformat(),
-        "location": LOCATION,
-        "temperature": round(float(temperature), 1),
-        "risk": risk,
-        "probability": round(float(probability), 4),
-        "prediction": prediction,
-        "explanation": f"The {'forecast' if target > _today() else 'observed'} weather conditions indicate a {risk.lower()} heatwave risk from the trained model.",
-        "weather_source": source,
-        **extra,
-    }
-
-
-def predict_heatwave(requested_date: str | date) -> dict[str, Any]:
-    """Predict heatwave risk for a user-provided date using the existing model."""
-    try:
-        target = parse_date(requested_date)
-    except (TypeError, ValueError) as exc:
-        return _failure(_today(), f"Invalid date: {exc}")
-
-    today = _today()
-    if target == today:
-        prediction = get_realtime_prediction()
-        if prediction.get("error"):
-            return _failure(target, f"Model prediction failed: {prediction['error']}", prediction.get("weather_source", "Current weather API"))
-        current = prediction.get("current_weather", {})
-        temperature = current.get("temperature_2m")
-        if temperature is None or prediction.get("risk_level") is None:
-            return _failure(target, "Current weather or model risk data is incomplete.")
-        probability = float(prediction.get("probability", 0.0))
-        risk = str(prediction["risk_level"])
-        return _result(
-            target,
-            float(temperature),
-            risk,
-            probability,
-            "Heatwave likely" if risk.upper() == "HIGH" else "Heatwave risk assessed by model",
-            "Open-Meteo current weather API",
-            date_type="today",
-            model_name=prediction.get("model_name"),
-            model_features=prediction.get("feature_row"),
+def predict_heatwave(requested_date: str | date) -> Dict[str, Any]:
+    """
+    Main heatwave prediction pipeline for a user-provided date.
+    DATE PARSING -> CHECK DATE -> GET WEATHER DATA -> PREPARE FEATURES -> MODEL INFERENCE -> RETURN TEMP + RISK.
+    """
+    parsed = parse_date_input(requested_date)
+    if not parsed["valid"]:
+        today = get_current_today()
+        return _failure_result(
+            today.isoformat(),
+            format_display_date(today),
+            f"Invalid date: {parsed['error']}",
+            "Date Parser",
         )
 
+    target = parsed["target_date"]
+    date_type = parsed["date_type"]  # TODAY, FUTURE, PAST
+    formatted_date = parsed["formatted_date"]
+    iso_date = parsed["iso_date"]
+
+    # 1. Fetch weather forecast or historical data
     weather = fetch_weather_for_date(target)
-    if not weather.get("available"):
-        return _failure(target, weather.get("error", "Weather forecast is unavailable."), weather.get("weather_source", "Open-Meteo forecast API"))
 
-    if target < today:
-        if not HISTORICAL_DAILY_PATH.exists():
-            return _failure(target, "Historical weather data is not available for this date.", "Historical Erode daily dataset")
-        source = "Historical Erode daily dataset"
+    # Out of forecast range check
+    if not weather.get("available"):
+        if date_type == "PAST":
+            # Check if target is present in historical CSV
+            if not HISTORICAL_DAILY_PATH.exists():
+                return _failure_result(iso_date, formatted_date, f"Historical weather data for {formatted_date} is not available in the current system.", "Historical Dataset", date_type="past")
+            hist_df = pd.read_csv(HISTORICAL_DAILY_PATH, parse_dates=["date"])
+            target_ts = pd.Timestamp(target).normalize()
+            hist_match = hist_df[hist_df["date"] == target_ts]
+            if hist_match.empty:
+                return _failure_result(iso_date, formatted_date, f"Historical weather data for {formatted_date} is not available in the current system.", "Historical Dataset", date_type="past")
+            # Historical row is available in dataset
+            daily_df = hist_df
+        else:
+            return _failure_result(iso_date, formatted_date, weather.get("error", "Weather data unavailable."), weather.get("weather_source", "Open-Meteo forecast API"), date_type=date_type.lower())
     else:
-        source = weather.get("weather_source", "Open-Meteo forecast API")
+        daily_df = weather["daily_df"]
+
+    # 2. Prepare Model Features (35 features matching training)
+    try:
+        feature_row, full_row = build_model_features(target, daily_df)
+    except Exception as exc:
+        return _failure_result(iso_date, formatted_date, f"Feature preparation failed: {exc}", "Feature Engineering", date_type=date_type.lower())
+
+    # 3. Load Trained Heatwave Model
+    if not MODEL_PATH.exists():
+        return _failure_result(iso_date, formatted_date, f"Trained ML model is missing at {MODEL_PATH}", "ML Model", date_type=date_type.lower())
 
     try:
-        feature_row, full_row = build_model_features(target, weather["daily_df"])
-        if not MODEL_PATH.exists():
-            return _failure(target, f"Trained model is missing: {MODEL_PATH}")
         model = joblib.load(MODEL_PATH)
-        prediction_class = int(model.predict(feature_row)[0])
-        probability = float(model.predict_proba(feature_row)[0][1]) if hasattr(model, "predict_proba") else float(prediction_class)
+        pred_class = int(model.predict(feature_row)[0])
+        probability = float(model.predict_proba(feature_row)[0][1]) if hasattr(model, "predict_proba") else float(pred_class)
         risk = calculate_risk_level(probability)
-        temperature = float(weather["target_weather"]["max_temperature"])
-        return _result(
-            target,
-            temperature,
-            risk,
-            probability,
-            "Heatwave likely" if prediction_class == 1 else "Heatwave not indicated by the model",
-            source,
-            date_type="future" if target > today else "past",
-            model_name=type(model).__name__,
-            model_features=feature_row,
-            engineered_row=full_row,
-            forecast_range=weather.get("forecast_range"),
-        )
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        return _failure(target, f"Model prediction failed: {exc}", source)
+
+        # Standardize Moderate / Medium naming for UI display
+        display_risk = "Moderate" if risk.upper() in {"MEDIUM", "MODERATE"} else risk.title()
+
+        # Extract Forecast/Observed Temperature directly from weather dataset
+        if "target_weather" in weather and "max_temperature" in weather["target_weather"]:
+            temperature = float(weather["target_weather"]["max_temperature"])
+        elif "max_temperature" in full_row:
+            temperature = float(full_row["max_temperature"])
+        elif date_type == "TODAY" and weather.get("current", {}).get("temperature_2m") is not None:
+            temperature = float(weather["current"]["temperature_2m"])
+        else:
+            temperature = float(feature_row["max_temperature"].values[0])
+
+        source_name = "Open-Meteo forecast + trained ML model" if date_type == "FUTURE" else ("Open-Meteo current weather + trained ML model" if date_type == "TODAY" else "Historical weather + trained ML model")
+
+        result = {
+            "available": True,
+            "date": iso_date,
+            "formatted_date": formatted_date,
+            "location": LOCATION,
+            "temperature": round(temperature, 1),
+            "risk": display_risk,
+            "probability": round(probability, 4),
+            "prediction_class": pred_class,
+            "prediction": "Heatwave likely" if pred_class == 1 else "Heatwave unlikely",
+            "source": source_name,
+            "weather_source": weather.get("weather_source", "Open-Meteo forecast API"),
+            "date_type": date_type.lower(),
+            "model_name": type(model).__name__,
+            "forecast_range": weather.get("forecast_range"),
+        }
+
+        # Format exact user response text
+        result["user_response"] = format_user_response(result)
+
+        # Log debug info if enabled
+        _log_debug_info(parsed, weather, feature_row, pred_class, display_risk)
+
+        return result
+
+    except Exception as exc:
+        return _failure_result(iso_date, formatted_date, f"Model inference failed: {exc}", "ML Inference", date_type=date_type.lower())
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Predict Erode heatwave risk for a date.")
-    parser.add_argument("date", help="Today, Tomorrow, YYYY-MM-DD, September 20, 2026, or 20/09/2026")
+    parser = argparse.ArgumentParser(description="Predict Erode heatwave risk for a requested date.")
+    parser.add_argument("date", help="Target date e.g. 'today', 'tomorrow', '2026-09-20', 'September 20, 2026', '20/09/2026'")
     args = parser.parse_args()
-    result = predict_heatwave(args.date)
-    print(result)
+
+    # Enable debug output for direct CLI invocation
+    os.environ["SAFEGRAPH_AI_DEBUG"] = "1"
+    res = predict_heatwave(args.date)
+    print(res.get("user_response", res))
 
 
 if __name__ == "__main__":

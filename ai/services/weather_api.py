@@ -13,34 +13,15 @@ def fetch_erode_weather(forecast_days: int = 16) -> dict[str, object]:
     Fetch live, recent, and bounded forecast weather data for Erode from Open-Meteo.
     Uses st.cache_data with a 5-minute (300s) TTL.
     """
+    vars_str = "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,wind_speed_10m,wind_gusts_10m,vapour_pressure_deficit,cloud_cover,dew_point_2m"
     params = {
         "latitude": ERODE_LAT,
         "longitude": ERODE_LON,
         "timezone": ERODE_TIMEZONE,
         "past_days": 7,
         "forecast_days": max(1, min(int(forecast_days), 16)),
-        "current": [
-            "temperature_2m",
-            "relative_humidity_2m",
-            "apparent_temperature",
-            "precipitation",
-            "wind_speed_10m",
-            "wind_gusts_10m",
-            "vapour_pressure_deficit",
-            "cloud_cover",
-            "dew_point_2m",
-        ],
-        "hourly": [
-            "temperature_2m",
-            "relative_humidity_2m",
-            "apparent_temperature",
-            "precipitation",
-            "wind_speed_10m",
-            "wind_gusts_10m",
-            "vapour_pressure_deficit",
-            "cloud_cover",
-            "dew_point_2m",
-        ],
+        "current": vars_str,
+        "hourly": vars_str,
     }
 
     headers = {"User-Agent": "SafeGraph-AI/1.0 (Erode Heatwave Prediction)"}
