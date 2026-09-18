@@ -88,8 +88,32 @@ def parse_date_input(input_value: str | date, today_override: Optional[date] = N
         return _build_date_payload(today + timedelta(days=1), today, text)
     if lowered == "yesterday":
         return _build_date_payload(today - timedelta(days=1), today, text)
-    if lowered in {"next week", "nextweek", "in a week"}:
+    if lowered in {"next week", "nextweek", "in a week", "one week from now", "in 7 days"}:
         return _build_date_payload(today + timedelta(days=7), today, text)
+    if lowered in {"next month", "in a month", "one month from now", "in 1 month"}:
+        return _build_date_payload(_add_months(today, 1), today, text)
+    if lowered in {"next year", "in a year", "one year from now", "same date next year"}:
+        return _build_date_payload(_same_date_next_year(today), today, text)
+
+    # Generic relative date phrases like "in 3 months", "6 months from now", "in 2 years"
+    relative_match = re.match(r"^(?:in\s+)?(\d+)\s+(day|days|week|weeks|month|months|year|years)\s+(?:from\s+now|later|hence)?$", lowered)
+    if relative_match:
+        count = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        delta = timedelta(days=count) if unit.startswith("day") else timedelta(weeks=count) if unit.startswith("week") else timedelta(days=count * 30)
+        if unit.startswith("month"):
+            return _build_date_payload(_add_months(today, count), today, text)
+        if unit.startswith("year"):
+            return _build_date_payload(_same_date_next_year(today, offset_years=count), today, text)
+        return _build_date_payload(today + delta, today, text)
+
+    month_from_now_match = re.match(r"^(?:in\s+)?(\d+)\s+months?\s+from\s+now$", lowered)
+    if month_from_now_match:
+        return _build_date_payload(_add_months(today, int(month_from_now_match.group(1))), today, text)
+
+    year_from_now_match = re.match(r"^(?:in\s+)?(\d+)\s+years?\s+from\s+now$", lowered)
+    if year_from_now_match:
+        return _build_date_payload(_same_date_next_year(today, offset_years=int(year_from_now_match.group(1))), today, text)
 
     # Clean punctuation surrounding text if user passed query like "prediction for 2026-09-20?"
     cleaned_text = re.sub(r"[?.,!]", "", text).strip()
@@ -153,6 +177,22 @@ def parse_date_input(input_value: str | date, today_override: Optional[date] = N
         text,
         "Unrecognized date format. Supported formats: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, September 20, 2026, 20 September 2026, today, tomorrow, next week.",
     )
+
+
+def _add_months(base: date, months: int) -> date:
+    month_index = (base.year * 12) + (base.month - 1) + months
+    year = month_index // 12
+    month = (month_index % 12) + 1
+    day = min(base.day, 28)
+    return date(year, month, day)
+
+
+def _same_date_next_year(base: date, offset_years: int = 1) -> date:
+    target_year = base.year + offset_years
+    try:
+        return date(target_year, base.month, base.day)
+    except ValueError:
+        return date(target_year, base.month, 28)
 
 
 def _build_date_payload(target: date, today: date, raw_input: str) -> Dict[str, Any]:

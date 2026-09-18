@@ -43,7 +43,7 @@ def fetch_weather_for_date(target_date: date) -> Dict[str, Any]:
             OPEN_METEO_URL,
             params=params,
             headers={"User-Agent": "SafeGraph-AI-Heatwave-Prediction/1.0"},
-            timeout=15,
+            timeout=8,
         )
         response.raise_for_status()
         payload = response.json()
